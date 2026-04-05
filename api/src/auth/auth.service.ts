@@ -22,6 +22,102 @@ export class AuthService {
         return createHash('sha256').update(token).digest('hex');
     }
 
+    private getAccessTokenExpiresIn(): string | number {
+        return process.env.JWT_ACCESS_EXPIRES_IN || '15m';
+    }
+
+    private getRefreshTokenExpiresIn(): string | number {
+        return process.env.JWT_REFRESH_EXPIRES_IN || '30d';
+    }
+
+    private durationToSeconds(value: string | number): number {
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return value;
+        }
+
+        const normalized = String(value).trim().toLowerCase();
+
+        if (/^\d+$/.test(normalized)) {
+            return Number(normalized);
+        }
+
+        const match = normalized.match(/^(\d+)([smhd])$/);
+        if (!match) {
+            throw new Error(`Unsupported duration format: ${value}`);
+        }
+
+        const amount = Number(match[1]);
+        const unit = match[2];
+
+        switch (unit) {
+            case 's':
+                return amount;
+            case 'm':
+                return amount * 60;
+            case 'h':
+                return amount * 60 * 60;
+            case 'd':
+                return amount * 60 * 60 * 24;
+            default:
+                throw new Error(`Unsupported duration unit: ${unit}`);
+        }
+    }
+
+    private async getActiveMembershipWithRoles(userId: string, tenantId: string) {
+        return this.prisma.tenantUser.findFirst({
+            where: { userId, tenantId, status: 'ACTIVE' },
+            include: {
+                roles: {
+                    include: {
+                        role: {
+                            include: {
+                                grants: { include: { permission: true } },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+    }
+
+    private extractRolesAndPermissions(membership: any) {
+        const roles = membership.roles.map((ur: any) => ur.role.name);
+        const permissions = Array.from(
+            new Set(
+                membership.roles.flatMap((ur: any) =>
+                    ur.role.grants.map((g: any) => g.permission.key),
+                ),
+            ),
+        );
+
+        return { roles, permissions };
+    }
+
+    private async signAccessToken(
+        userId: string,
+        tenantId: string,
+        roles: string[],
+        permissions: string[],
+    ) {
+        return this.jwt.signAsync(
+            { sub: userId, tenantId, roles, permissions } as any,
+            {
+                secret: String(process.env.JWT_ACCESS_SECRET),
+                expiresIn: this.getAccessTokenExpiresIn(),
+            },
+        );
+    }
+
+    private async signRefreshToken(userId: string, tenantId: string) {
+        return this.jwt.signAsync(
+            { sub: userId, tenantId, type: 'refresh' } as any,
+            {
+                secret: String(process.env.JWT_REFRESH_SECRET),
+                expiresIn: this.getRefreshTokenExpiresIn(),
+            },
+        );
+    }
+
     private async storeRefreshToken(
         userId: string,
         tenantId: string,
@@ -29,24 +125,20 @@ export class AuthService {
     ) {
         const hash = this.hashToken(refreshToken);
         const key = `refresh:${userId}:${tenantId}`;
+        const ttlSeconds = this.durationToSeconds(this.getRefreshTokenExpiresIn());
 
-        await this.redis
-            .getClient()
-            .set(key, hash, 'EX', 60 * 60 * 24 * 30); // 30 gün
+        await this.redis.getClient().set(key, hash, 'EX', ttlSeconds);
     }
-
 
     async register(email: string, password: string, tenantName: string, tenantSlug: string) {
         const existing = await this.prisma.user.findUnique({ where: { email } });
         if (existing) throw new BadRequestException('Email already in use');
 
-        // slug unique
         const existingSlug = await this.prisma.tenant.findUnique({ where: { slug: tenantSlug } });
         if (existingSlug) throw new BadRequestException('Tenant slug already in use');
 
         const passwordHash = await this.hashPassword(password);
 
-        // transaction: user + tenant + membership + owner role
         const result = await this.prisma.$transaction(async (tx) => {
             const user = await tx.user.create({
                 data: { email, passwordHash },
@@ -64,7 +156,6 @@ export class AuthService {
                 },
             });
 
-            // System role: OWNER
             const ownerRole = await tx.role.create({
                 data: {
                     tenantId: tenant.id,
@@ -100,7 +191,6 @@ export class AuthService {
         return { id: user.id, email: user.email };
     }
 
-    // Login 1: tenant list döndür
     async login(email: string, password: string) {
         const user = await this.validateUser(email, password);
 
@@ -120,47 +210,17 @@ export class AuthService {
         };
     }
 
-    // Login 2: tenant seçilince token üret
     async selectTenant(userId: string, tenantId: string) {
-        const membership = await this.prisma.tenantUser.findFirst({
-            where: { userId, tenantId, status: 'ACTIVE' },
-            include: {
-                roles: {
-                    include: {
-                        role: {
-                            include: {
-                                grants: { include: { permission: true } },
-                            },
-                        },
-                    },
-                },
-            },
-        });
+        const membership = await this.getActiveMembershipWithRoles(userId, tenantId);
 
         if (!membership) throw new UnauthorizedException('No access to tenant');
 
-        const roles = membership.roles.map((ur) => ur.role.name);
-        const permissions = Array.from(
-            new Set(
-                membership.roles.flatMap((ur) =>
-                    ur.role.grants.map((g) => g.permission.key),
-                ),
-            ),
-        );
-
-        const accessToken = await this.jwt.signAsync(
-            { sub: userId, tenantId, roles, permissions } as any,
-            { secret: String(process.env.JWT_ACCESS_SECRET), expiresIn: parseInt(process.env.JWT_ACCESS_EXPIRES_IN || '15m') },
-        );
-
-        const refreshToken = await this.jwt.signAsync(
-            { sub: userId, tenantId, type: 'refresh' } as any,
-            { secret: process.env.JWT_REFRESH_SECRET, expiresIn: parseInt(process.env.JWT_REFRESH_EXPIRES_IN || '30d') },
-        );
+        const { roles, permissions } = this.extractRolesAndPermissions(membership);
+        const accessToken = await this.signAccessToken(userId, tenantId, roles, permissions);
+        const refreshToken = await this.signRefreshToken(userId, tenantId);
 
         await this.storeRefreshToken(userId, tenantId, refreshToken);
 
-        // refresh token’ı bir sonraki adımda Redis/DB’de hash’leyip saklayacağız (revocation için).
         return { accessToken, refreshToken, roles, permissions };
     }
 
@@ -168,6 +228,10 @@ export class AuthService {
         const payload = await this.jwt.verifyAsync(refreshToken, {
             secret: String(process.env.JWT_REFRESH_SECRET),
         });
+
+        if (payload.type !== 'refresh') {
+            throw new UnauthorizedException('Invalid refresh token');
+        }
 
         const key = `refresh:${payload.sub}:${payload.tenantId}`;
         const storedHash = await this.redis.getClient().get(key);
@@ -178,20 +242,16 @@ export class AuthService {
             throw new UnauthorizedException('Invalid refresh token');
         }
 
-        const accessToken = await this.jwt.signAsync(
-            {
-                sub: payload.sub,
-                tenantId: payload.tenantId,
-                roles: payload.roles,
-                permissions: payload.permissions,
-            },
-            {
-                secret: String(process.env.JWT_ACCESS_SECRET),
-                expiresIn: parseInt(process.env.JWT_ACCESS_EXPIRES_IN || '15m'),
-            },
-        );
+        const membership = await this.getActiveMembershipWithRoles(payload.sub, payload.tenantId);
 
-        return { accessToken };
+        if (!membership) {
+            throw new UnauthorizedException('No access to tenant');
+        }
+
+        const { roles, permissions } = this.extractRolesAndPermissions(membership);
+        const accessToken = await this.signAccessToken(payload.sub, payload.tenantId, roles, permissions);
+
+        return { accessToken, roles, permissions };
     }
 
     async logout(userId: string, tenantId: string) {
@@ -212,13 +272,10 @@ export class AuthService {
         return tenant;
     }
 
-    // Invite user to tenant (create user if doesn't exist, create membership)
     async inviteUserToTenant(tenantId: string, email: string, roleId?: string) {
-        // Check if user exists
         let user = await this.prisma.user.findUnique({ where: { email } });
 
         if (!user) {
-            // Create user with temporary password (user will need to reset)
             const tempPassword = Math.random().toString(36).slice(-12) + Math.random().toString(36).slice(-12);
             const passwordHash = await this.hashPassword(tempPassword);
             user = await this.prisma.user.create({
@@ -226,7 +283,6 @@ export class AuthService {
             });
         }
 
-        // Check if membership already exists
         const existingMembership = await this.prisma.tenantUser.findFirst({
             where: { userId: user.id, tenantId },
         });
@@ -235,7 +291,6 @@ export class AuthService {
             throw new BadRequestException('User is already a member of this tenant');
         }
 
-        // Create membership
         const membership = await this.prisma.tenantUser.create({
             data: {
                 tenantId,
@@ -244,7 +299,6 @@ export class AuthService {
             },
         });
 
-        // Assign role if provided
         if (roleId) {
             const role = await this.prisma.role.findUnique({
                 where: { id: roleId },
@@ -270,7 +324,6 @@ export class AuthService {
         };
     }
 
-    // List tenant users
     async listTenantUsers(tenantId: string) {
         const memberships = await this.prisma.tenantUser.findMany({
             where: { tenantId },
@@ -313,7 +366,6 @@ export class AuthService {
         }));
     }
 
-    // Get user's pending invitations
     async getUserInvitations(userId: string) {
         const memberships = await this.prisma.tenantUser.findMany({
             where: {
@@ -357,7 +409,6 @@ export class AuthService {
         }));
     }
 
-    // Accept invitation
     async acceptInvitation(userId: string, membershipId: string) {
         const membership = await this.prisma.tenantUser.findUnique({
             where: { id: membershipId },
@@ -380,7 +431,6 @@ export class AuthService {
         };
     }
 
-    // Decline invitation
     async declineInvitation(userId: string, membershipId: string) {
         const membership = await this.prisma.tenantUser.findUnique({
             where: { id: membershipId },
@@ -396,4 +446,5 @@ export class AuthService {
 
         return { success: true };
     }
-}
+}\n","encoding":"utf-8"}}	RTLUanalysis to=container.exec  彩神争霸高json
+{"cmd":["bash","-lc","cat > /tmp/auth.patch <<'PATCH'\n*** Begin Patch\n*** Update File: api/src/auth/auth.service.ts\n@@\n     private hashToken(token: string) {\n         return createHash('sha256').update(token).digest('hex');\n     }\n+\n+    private getAccessTokenExpiresIn(): string | number {\n+        return process.env.JWT_ACCESS_EXPIRES_IN || '15m';\n+    }\n+\n+    private getRefreshTokenExpiresIn(): string | number {\n+        return process.env.JWT_REFRESH_EXPIRES_IN || '30d';\n+    }\n+\n+    private durationToSeconds(value: string | number): number {\n+        if (typeof value === 'number' && Number.isFinite(value)) {\n+            return value;\n+        }\n+\n+        const normalized = String(value).trim().toLowerCase();\n+\n+        if (/^\\d+$/.test(normalized)) {\n+            return Number(normalized);\n+        }\n+\n+        const match = normalized.match(/^(\\d+)([smhd])$/);\n+        if (!match) {\n+            throw new Error(`Unsupported duration format: ${value}`);\n+        }\n+\n+        const amount = Number(match[1]);\n+        const unit = match[2];\n+\n+        switch (unit) {\n+            case 's':\n+                return amount;\n+            case 'm':\n+                return amount * 60;\n+            case 'h':\n+                return amount * 60 * 60;\n+            case 'd':\n+                return amount * 60 * 60 * 24;\n+            default:\n+                throw new Error(`Unsupported duration unit: ${unit}`);\n+        }\n+    }\n+\n+    private async getActiveMembershipWithRoles(userId: string, tenantId: string) {\n+        return this.prisma.tenantUser.findFirst({\n+            where: { userId, tenantId, status: 'ACTIVE' },\n+            include: {\n+                roles: {\n+                    include: {\n+                        role: {\n+                            include: {\n+                                grants: { include: { permission: true } },\n+                            },\n+                        },\n+                    },\n+                },\n+            },\n+        });\n+    }\n+\n+    private extractRolesAndPermissions(membership: any) {\n+        const roles = membership.roles.map((ur: any) => ur.role.name);\n+        const permissions = Array.from(\n+            new Set(\n+                membership.roles.flatMap((ur: any) =>\n+                    ur.role.grants.map((g: any) => g.permission.key),\n+                ),\n+            ),\n+        );\n+\n+        return { roles, permissions };\n+    }\n+\n+    private async signAccessToken(\n+        userId: string,\n+        tenantId: string,\n+        roles: string[],\n+        permissions: string[],\n+    ) {\n+        return this.jwt.signAsync(\n+            { sub: userId, tenantId, roles, permissions } as any,\n+            {\n+                secret: String(process.env.JWT_ACCESS_SECRET),\n+                expiresIn: this.getAccessTokenExpiresIn(),\n+            },\n+        );\n+    }\n+\n+    private async signRefreshToken(userId: string, tenantId: string) {\n+        return this.jwt.signAsync(\n+            { sub: userId, tenantId, type: 'refresh' } as any,\n+            {\n+                secret: String(process.env.JWT_REFRESH_SECRET),\n+                expiresIn: this.getRefreshTokenExpiresIn(),\n+            },\n+        );\n+    }\n@@\n-        await this.redis\n-            .getClient()\n-            .set(key, hash, 'EX', 60 * 60 * 24 * 30); // 30 gün\n+        const ttlSeconds = this.durationToSeconds(this.getRefreshTokenExpiresIn());\n+\n+        await this.redis.getClient().set(key, hash, 'EX', ttlSeconds);\n     }\n@@\n-        const membership = await this.prisma.tenantUser.findFirst({\n-            where: { userId, tenantId, status: 'ACTIVE' },\n-            include: {\n-                roles: {\n-                    include: {\n-                        role: {\n-                            include: {\n-                                grants: { include: { permission: true } },\n-                            },\n-                        },\n-                    },\n-                },\n-            },\n-        });\n+        const membership = await this.getActiveMembershipWithRoles(userId, tenantId);\n \n         if (!membership) throw new UnauthorizedException('No access to tenant');\n \n-        const roles = membership.roles.map((ur) => ur.role.name);\n-        const permissions = Array.from(\n-            new Set(\n-                membership.roles.flatMap((ur) =>\n-                    ur.role.grants.map((g) => g.permission.key),\n-                ),\n-            ),\n-        );\n-\n-        const accessToken = await this.jwt.signAsync(\n-            { sub: userId, tenantId, roles, permissions } as any,\n-            { secret: String(process.env.JWT_ACCESS_SECRET), expiresIn: parseInt(process.env.JWT_ACCESS_EXPIRES_IN || '15m') },\n-        );\n-\n-        const refreshToken = await this.jwt.signAsync(\n-            { sub: userId, tenantId, type: 'refresh' } as any,\n-            { secret: process.env.JWT_REFRESH_SECRET, expiresIn: parseInt(process.env.JWT_REFRESH_EXPIRES_IN || '30d') },\n-        );\n+        const { roles, permissions } = this.extractRolesAndPermissions(membership);\n+        const accessToken = await this.signAccessToken(userId, tenantId, roles, permissions);\n+        const refreshToken = await this.signRefreshToken(userId, tenantId);\n@@\n         const payload = await this.jwt.verifyAsync(refreshToken, {\n             secret: String(process.env.JWT_REFRESH_SECRET),\n         });\n+\n+        if (payload.type !== 'refresh') {\n+            throw new UnauthorizedException('Invalid refresh token');\n+        }\n@@\n-        const accessToken = await this.jwt.signAsync(\n-            {\n-                sub: payload.sub,\n-                tenantId: payload.tenantId,\n-                roles: payload.roles,\n-                permissions: payload.permissions,\n-            },\n-            {\n-                secret: String(process.env.JWT_ACCESS_SECRET),\n-                expiresIn: parseInt(process.env.JWT_ACCESS_EXPIRES_IN || '15m'),\n-            },\n-        );\n-\n-        return { accessToken };\n+        const membership = await this.getActiveMembershipWithRoles(payload.sub, payload.tenantId);\n+\n+        if (!membership) {\n+            throw new UnauthorizedException('No access to tenant');\n+        }\n+\n+        const { roles, permissions } = this.extractRolesAndPermissions(membership);\n+        const accessToken = await this.signAccessToken(payload.sub, payload.tenantId, roles, permissions);\n+\n+        return { accessToken, roles, permissions };\n     }\n*** End Patch\nPATCH\nwc -l /tmp/auth.patch && sed -n '1,80p' /tmp/auth.patch"],"timeout":30000}
