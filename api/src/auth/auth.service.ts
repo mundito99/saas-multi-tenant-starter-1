@@ -22,12 +22,12 @@ export class AuthService {
         return createHash('sha256').update(token).digest('hex');
     }
 
-    private getAccessTokenExpiresIn(): string | number {
-        return process.env.JWT_ACCESS_EXPIRES_IN || '15m';
+    private getAccessTokenExpiresIn() {
+        return (process.env.JWT_ACCESS_EXPIRES_IN || '15m') as any;
     }
 
-    private getRefreshTokenExpiresIn(): string | number {
-        return process.env.JWT_REFRESH_EXPIRES_IN || '30d';
+    private getRefreshTokenExpiresIn() {
+        return (process.env.JWT_REFRESH_EXPIRES_IN || '30d') as any;
     }
 
     private durationToSeconds(value: string | number): number {
@@ -80,12 +80,12 @@ export class AuthService {
         });
     }
 
-    private extractRolesAndPermissions(membership: any) {
-        const roles = membership.roles.map((ur: any) => ur.role.name);
-        const permissions = Array.from(
-            new Set(
+    private extractRolesAndPermissions(membership: any): { roles: string[]; permissions: string[] } {
+        const roles: string[] = membership.roles.map((ur: any) => String(ur.role.name));
+        const permissions: string[] = Array.from(
+            new Set<string>(
                 membership.roles.flatMap((ur: any) =>
-                    ur.role.grants.map((g: any) => g.permission.key),
+                    ur.role.grants.map((g: any) => String(g.permission.key)),
                 ),
             ),
         );
@@ -104,7 +104,7 @@ export class AuthService {
             {
                 secret: String(process.env.JWT_ACCESS_SECRET),
                 expiresIn: this.getAccessTokenExpiresIn(),
-            },
+            } as any,
         );
     }
 
@@ -114,7 +114,7 @@ export class AuthService {
             {
                 secret: String(process.env.JWT_REFRESH_SECRET),
                 expiresIn: this.getRefreshTokenExpiresIn(),
-            },
+            } as any,
         );
     }
 
