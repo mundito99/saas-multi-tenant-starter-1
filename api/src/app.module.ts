@@ -6,6 +6,7 @@ import { RedisModule } from './redis/redis.module';
 import { ProjectsModule } from './projects/projects.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { RolesModule } from './roles/roles.module';
+import { PlatformModule } from './platform/platform.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { RolesModule } from './roles/roles.module';
     ProjectsModule,
     PermissionsModule,
     RolesModule,
+    PlatformModule,
   ],
 })
 export class AppModule { }
