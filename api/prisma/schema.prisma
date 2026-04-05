@@ -23,29 +23,70 @@ enum TenantUserStatus {
   DISABLED
 }
 
-model User {
-  id            String   @id @default(cuid())
-  email         String   @unique
-  passwordHash  String
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+enum BranchStatus {
+  ACTIVE
+  INACTIVE
+}
 
-  memberships   TenantUser[]
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  passwordHash   String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  memberships    TenantUser[]
+  platformConfig PlatformConfig? @relation("PlatformSuperAdmin")
+  ownedTenants   Tenant[]        @relation("TenantOwner")
+  createdTenants Tenant[]        @relation("TenantCreatedByPlatformUser")
+}
+
+model PlatformConfig {
+  id               String   @id @default("platform")
+  superAdminUserId String   @unique
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  superAdmin       User     @relation("PlatformSuperAdmin", fields: [superAdminUserId], references: [id], onDelete: Cascade)
 }
 
 model Tenant {
+  id                      String       @id @default(cuid())
+  name                    String
+  slug                    String       @unique
+  status                  TenantStatus @default(ACTIVE)
+  createdByPlatformUserId String?
+  ownerUserId             String?
+  createdAt               DateTime     @default(now())
+  updatedAt               DateTime     @updatedAt
+
+  createdByPlatformUser   User?        @relation("TenantCreatedByPlatformUser", fields: [createdByPlatformUserId], references: [id], onDelete: SetNull)
+  ownerUser               User?        @relation("TenantOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+
+  settings                TenantSetting[]
+  members                 TenantUser[]
+  roles                   Role[]
+  projects                Project[]
+  branches                Branch[]
+}
+
+model Branch {
   id        String       @id @default(cuid())
+  tenantId  String
   name      String
-  slug      String       @unique
-  status    TenantStatus @default(ACTIVE)
+  slug      String
+  code      String?
+  isMain    Boolean      @default(false)
+  status    BranchStatus @default(ACTIVE)
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
-  settings  TenantSetting[]
-  members   TenantUser[]
-  roles     Role[]
-  projects  Project[] 
+  tenant    Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  members   TenantUserBranch[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId])
 }
 
 model TenantSetting {
@@ -74,6 +115,11 @@ model TenantUser {
   user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   roles     TenantUserRole[]
+  branches  TenantUserBranch[]
+
+  @@unique([tenantId, userId])
+  @@index([tenantId])
+  @@index([userId])
 }
 
 model Role {
@@ -117,6 +163,16 @@ model TenantUserRole {
   role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@id([tenantUserId, roleId])
+}
+
+model TenantUserBranch {
+  tenantUserId String
+  branchId     String
+
+  tenantUser   TenantUser @relation(fields: [tenantUserId], references: [id], onDelete: Cascade)
+  branch       Branch     @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([tenantUserId, branchId])
 }
 
 model Project {

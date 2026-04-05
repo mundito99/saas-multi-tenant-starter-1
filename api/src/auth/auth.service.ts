@@ -130,55 +130,44 @@ export class AuthService {
         await this.redis.getClient().set(key, hash, 'EX', ttlSeconds);
     }
 
-    async register(email: string, password: string, tenantName: string, tenantSlug: string) {
+    async register(email: string, password: string) {
         const existing = await this.prisma.user.findUnique({ where: { email } });
         if (existing) throw new BadRequestException('Email already in use');
 
-        const existingSlug = await this.prisma.tenant.findUnique({ where: { slug: tenantSlug } });
-        if (existingSlug) throw new BadRequestException('Tenant slug already in use');
-
         const passwordHash = await this.hashPassword(password);
 
-        const result = await this.prisma.$transaction(async (tx) => {
-            const user = await tx.user.create({
-                data: { email, passwordHash },
-            });
-
-            const tenant = await tx.tenant.create({
-                data: { name: tenantName, slug: tenantSlug },
-            });
-
-            const membership = await tx.tenantUser.create({
-                data: {
-                    tenantId: tenant.id,
-                    userId: user.id,
-                    status: 'ACTIVE',
-                },
-            });
-
-            const ownerRole = await tx.role.create({
-                data: {
-                    tenantId: tenant.id,
-                    name: 'OWNER',
-                    description: 'Tenant owner',
-                    isSystem: true,
-                },
-            });
-
-            await tx.tenantUserRole.create({
-                data: {
-                    tenantUserId: membership.id,
-                    roleId: ownerRole.id,
-                },
-            });
-
-            return { user, tenant, membership };
+        const user = await this.prisma.user.create({
+            data: { email, passwordHash },
         });
 
         return {
-            userId: result.user.id,
-            tenantId: result.tenant.id,
+            userId: user.id,
         };
+    }
+
+    async isPlatformAdmin(userId: string) {
+        const config = await this.prisma.platformConfig.findUnique({
+            where: { id: 'platform' },
+            select: { superAdminUserId: true },
+        });
+
+        if (config?.superAdminUserId === userId) {
+            return true;
+        }
+
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { email: true },
+        });
+
+        if (!user) return false;
+
+        const allowedEmails = (process.env.PLATFORM_ADMIN_EMAILS || '')
+            .split(',')
+            .map((email) => email.trim().toLowerCase())
+            .filter(Boolean);
+
+        return allowedEmails.includes(user.email.toLowerCase());
     }
 
     async validateUser(email: string, password: string) {

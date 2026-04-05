@@ -18,7 +18,7 @@ export class AuthController {
 
     @Post('register')
     async register(@Body() dto: RegisterDto) {
-        return this.auth.register(dto.email, dto.password, dto.tenantName, dto.tenantSlug);
+        return this.auth.register(dto.email, dto.password);
     }
 
     // 1) email/pass -> tenant list
@@ -53,6 +53,7 @@ export class AuthController {
     async me(@Req() req: any) {
         const user = await this.auth.getUser(req.user.sub);
         const tenant = await this.auth.getTenant(req.user.tenantId);
+        const isPlatformAdmin = await this.auth.isPlatformAdmin(req.user.sub);
         return {
             email: user.email,
             isActive: user.isActive,
@@ -60,6 +61,7 @@ export class AuthController {
             updatedAt: user.updatedAt,
             tenantName: tenant.name,
             tenantSlug: tenant.slug,
+            isPlatformAdmin,
             ...req.user,
         };
     }
