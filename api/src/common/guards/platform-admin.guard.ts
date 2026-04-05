@@ -14,17 +14,27 @@ export class PlatformAdminGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     const userId = request.user?.sub;
 
-    if (!userId) {
-      throw new ForbiddenException('User context missing');
-    }
+    if (!userId) throw new ForbiddenException('User context missing');
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { email: true },
+      select: { id: true, email: true },
     });
 
-    if (!user) {
-      throw new ForbiddenException('User not found');
+    if (!user) throw new ForbiddenException('User not found');
+
+    const platformConfig = await this.prisma.platformConfig.findUnique({
+      where: { id: 'platform' },
+      select: { superAdminUserId: true },
+    });
+
+    if (platformConfig?.superAdminUserId) {
+      if (platformConfig.superAdminUserId !== user.id) {
+        throw new ForbiddenException('Platform admin access required');
+      }
+
+      request.isPlatformAdmin = true;
+      return true;
     }
 
     const allowedEmails = (process.env.PLATFORM_ADMIN_EMAILS || '')
@@ -36,7 +46,7 @@ export class PlatformAdminGuard implements CanActivate {
       throw new ForbiddenException('Platform admin access required');
     }
 
-    request.platformAdminEmail = user.email;
+    request.isPlatformAdmin = true;
     return true;
   }
 }
