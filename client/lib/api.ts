@@ -2,12 +2,10 @@ import axios, { AxiosError, AxiosInstance } from 'axios';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
-// Token storage keys
 const ACCESS_TOKEN_KEY = 'access_token';
 const REFRESH_TOKEN_KEY = 'refresh_token';
 const USER_ID_KEY = 'user_id';
 
-// Token management
 export const tokenStorage = {
     getAccessToken: (): string | null => {
         if (typeof window === 'undefined') return null;
@@ -41,7 +39,6 @@ export const tokenStorage = {
     },
 };
 
-// Create axios instance
 export const api: AxiosInstance = axios.create({
     baseURL: API_BASE_URL,
     headers: {
@@ -49,7 +46,6 @@ export const api: AxiosInstance = axios.create({
     },
 });
 
-// Request interceptor - add access token
 api.interceptors.request.use(
     (config) => {
         const token = tokenStorage.getAccessToken();
@@ -61,13 +57,11 @@ api.interceptors.request.use(
     (error) => Promise.reject(error)
 );
 
-// Response interceptor - handle token refresh
 api.interceptors.response.use(
     (response) => response,
     async (error: AxiosError) => {
         const originalRequest = error.config as any;
 
-        // If 401 and not already retrying
         if (error.response?.status === 401 && !originalRequest._retry) {
             originalRequest._retry = true;
 
@@ -77,19 +71,16 @@ api.interceptors.response.use(
                     throw new Error('No refresh token');
                 }
 
-                // Try to refresh
                 const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
                     refreshToken,
                 });
 
-                const { accessToken } = response.data;
+                const { accessToken } = response.data as RefreshResponse;
                 tokenStorage.setAccessToken(accessToken);
 
-                // Retry original request
                 originalRequest.headers.Authorization = `Bearer ${accessToken}`;
                 return api(originalRequest);
             } catch (refreshError) {
-                // Refresh failed, clear tokens and redirect to login
                 tokenStorage.clear();
                 if (typeof window !== 'undefined') {
                     window.location.href = '/login';
@@ -102,7 +93,6 @@ api.interceptors.response.use(
     }
 );
 
-// API types
 export interface RegisterRequest {
     email: string;
     password: string;
@@ -151,11 +141,14 @@ export interface RefreshRequest {
 
 export interface RefreshResponse {
     accessToken: string;
+    roles?: string[];
+    permissions?: string[];
 }
 
 export interface User {
     email: string;
     isActive: boolean;
+    isPlatformAdmin?: boolean;
     createdAt: Date;
     updatedAt: Date;
     tenantName: string;
@@ -208,7 +201,17 @@ export interface RespondInviteRequest {
     membershipId: string;
 }
 
-// API functions
+export interface PlatformTenant {
+    id: string;
+    name: string;
+    slug: string;
+    status: 'ACTIVE' | 'SUSPENDED';
+    ownerEmail: string | null;
+    memberCount: number;
+    createdAt: string;
+    updatedAt: string;
+}
+
 export const authApi = {
     register: async (data: RegisterRequest): Promise<RegisterResponse> => {
         const response = await api.post<RegisterResponse>('/auth/register', data);
@@ -273,6 +276,18 @@ export const authApi = {
 
     declineInvitation: async (data: RespondInviteRequest): Promise<{ success: boolean }> => {
         const response = await api.post<{ success: boolean }>('/auth/decline-invitation', data);
+        return response.data;
+    },
+};
+
+export const platformApi = {
+    listTenants: async (): Promise<PlatformTenant[]> => {
+        const response = await api.get<PlatformTenant[]>('/platform/tenants');
+        return response.data;
+    },
+
+    updateTenantStatus: async (tenantId: string, status: 'ACTIVE' | 'SUSPENDED'): Promise<PlatformTenant> => {
+        const response = await api.patch<PlatformTenant>(`/platform/tenants/${tenantId}/status`, { status });
         return response.data;
     },
 };
