@@ -1,4 +1,4 @@
-import { IsEmail, IsOptional, IsString } from 'class-validator';
+import { IsEmail, IsString } from 'class-validator';
 
 export class CreateTenantDto {
   @IsString()
@@ -9,15 +9,4 @@ export class CreateTenantDto {
 
   @IsEmail()
   adminEmail: string;
-
-  @IsString()
-  branchName: string;
-
-  @IsOptional()
-  @IsString()
-  branchSlug?: string;
-
-  @IsOptional()
-  @IsString()
-  branchCode?: string;
 }

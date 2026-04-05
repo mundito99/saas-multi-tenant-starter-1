@@ -6,17 +6,21 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { useAuth } from '@/contexts/auth-context';
 import { Eye, EyeOff, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 
 export default function RegisterPage() {
-  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [tenantName, setTenantName] = useState('');
-  const [tenantSlug, setTenantSlug] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -26,11 +30,10 @@ export default function RegisterPage() {
   const { register } = useAuth();
   const router = useRouter();
 
-  // Password strength checker
   const getPasswordStrength = (pwd: string) => {
     if (pwd.length === 0) return { strength: 0, label: '', color: '' };
     if (pwd.length < 8) return { strength: 1, label: 'Too short', color: 'text-red-500' };
-    
+
     let strength = 0;
     if (pwd.length >= 8) strength++;
     if (/[a-z]/.test(pwd)) strength++;
@@ -40,7 +43,7 @@ export default function RegisterPage() {
 
     const labels = ['', 'Weak', 'Fair', 'Good', 'Strong', 'Very Strong'];
     const colors = ['', 'text-red-500', 'text-orange-500', 'text-yellow-500', 'text-green-500', 'text-green-600'];
-    
+
     return {
       strength,
       label: labels[strength],
@@ -50,20 +53,11 @@ export default function RegisterPage() {
 
   const passwordStrength = getPasswordStrength(password);
 
-  // Auto-generate slug from tenant name
-  const handleTenantNameChange = (value: string) => {
-    setTenantName(value);
-    if (!tenantSlug || tenantSlug === tenantName.toLowerCase().replace(/[^a-z0-9]+/g, '-')) {
-      setTenantSlug(value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''));
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccess(false);
 
-    // Validation
     if (password !== confirmPassword) {
       setError('Passwords do not match');
       return;
@@ -74,17 +68,12 @@ export default function RegisterPage() {
       return;
     }
 
-    if (!tenantSlug || tenantSlug.length < 2) {
-      setError('Tenant slug must be at least 2 characters long');
-      return;
-    }
-
     setLoading(true);
 
     try {
-      await register(email, password, tenantName, tenantSlug);
+      await register(email, password);
       setSuccess(true);
-      // Redirect will happen automatically via auth context
+      router.push('/login');
     } catch (err: any) {
       setError(err.response?.data?.message || 'Registration failed. Please try again.');
     } finally {
@@ -97,7 +86,7 @@ export default function RegisterPage() {
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl font-bold">Create an Account</CardTitle>
-          <CardDescription>Enter your information to get started</CardDescription>
+          <CardDescription>Create your user first. A platform admin can later assign you to a tenant.</CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">
@@ -108,20 +97,10 @@ export default function RegisterPage() {
             )}
             {success && (
               <div className="rounded-md bg-green-50 p-3 text-sm text-green-800 dark:bg-green-900/20 dark:text-green-200">
-                Account created successfully! Redirecting...
+                Account created successfully. Redirecting to login...
               </div>
             )}
-            <div className="space-y-2">
-              <Label htmlFor="fullName">Full Name</Label>
-              <Input
-                id="fullName"
-                type="text"
-                placeholder="John Doe"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                disabled={loading}
-              />
-            </div>
+
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -134,6 +113,7 @@ export default function RegisterPage() {
                 disabled={loading}
               />
             </div>
+
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <div className="relative">
@@ -163,6 +143,7 @@ export default function RegisterPage() {
                 </div>
               )}
             </div>
+
             <div className="space-y-2">
               <Label htmlFor="confirmPassword">Confirm Password</Label>
               <div className="relative">
@@ -198,33 +179,6 @@ export default function RegisterPage() {
                   )}
                 </div>
               )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="tenantName">Company / Tenant Name</Label>
-              <Input
-                id="tenantName"
-                type="text"
-                placeholder="Acme Inc."
-                value={tenantName}
-                onChange={(e) => handleTenantNameChange(e.target.value)}
-                required
-                disabled={loading}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="tenantSlug">Tenant Slug</Label>
-              <Input
-                id="tenantSlug"
-                type="text"
-                placeholder="acme-inc"
-                value={tenantSlug}
-                onChange={(e) => setTenantSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-                required
-                disabled={loading}
-              />
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                URL-friendly identifier (lowercase, letters, numbers, and hyphens only)
-              </p>
             </div>
           </CardContent>
           <CardFooter className="flex flex-col space-y-4">

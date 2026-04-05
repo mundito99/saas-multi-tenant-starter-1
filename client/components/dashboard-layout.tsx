@@ -5,7 +5,16 @@ import { usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
-import { LogOut, User, Building2, Settings, LayoutDashboard, Mail, Shield } from 'lucide-react';
+import {
+  Building2,
+  GitBranch,
+  LayoutDashboard,
+  LogOut,
+  Mail,
+  Settings,
+  Shield,
+  User,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { authApi } from '@/lib/api';
 
@@ -38,15 +47,54 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         </div>
         <nav className="p-4">
           <div className="space-y-1">
-            <Link href="/app" className={cn('flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors', pathname === '/app' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300' : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800')}>
+            <Link
+              href="/app"
+              className={cn(
+                'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                pathname === '/app'
+                  ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300'
+                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800',
+              )}
+            >
               <LayoutDashboard className="h-4 w-4" />
               Dashboard
             </Link>
-            <Link href="/app/settings" className={cn('flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors', pathname === '/app/settings' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300' : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800')}>
+
+            <Link
+              href="/app/branches"
+              className={cn(
+                'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                pathname === '/app/branches'
+                  ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300'
+                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800',
+              )}
+            >
+              <GitBranch className="h-4 w-4" />
+              Branches
+            </Link>
+
+            <Link
+              href="/app/settings"
+              className={cn(
+                'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                pathname === '/app/settings'
+                  ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300'
+                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800',
+              )}
+            >
               <Settings className="h-4 w-4" />
               Settings
             </Link>
-            <Link href="/app/invitations" className={cn('flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors relative', pathname === '/app/invitations' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300' : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800')}>
+
+            <Link
+              href="/app/invitations"
+              className={cn(
+                'relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                pathname === '/app/invitations'
+                  ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300'
+                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800',
+              )}
+            >
               <Mail className="h-4 w-4" />
               Invitations
               {invitationCount > 0 && (
@@ -55,10 +103,21 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                 </span>
               )}
             </Link>
-            <Link href="/app/platform" className={cn('flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors', pathname === '/app/platform' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300' : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800')}>
-              <Shield className="h-4 w-4" />
-              Platform
-            </Link>
+
+            {user?.isPlatformAdmin && (
+              <Link
+                href="/app/platform"
+                className={cn(
+                  'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                  pathname === '/app/platform'
+                    ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300'
+                    : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800',
+                )}
+              >
+                <Shield className="h-4 w-4" />
+                Platform
+              </Link>
+            )}
           </div>
         </nav>
       </aside>

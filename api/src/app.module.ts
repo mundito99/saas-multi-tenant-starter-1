@@ -7,6 +7,7 @@ import { ProjectsModule } from './projects/projects.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { RolesModule } from './roles/roles.module';
 import { PlatformModule } from './platform/platform.module';
+import { BranchesModule } from './branches/branches.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { PlatformModule } from './platform/platform.module';
     PermissionsModule,
     RolesModule,
     PlatformModule,
+    BranchesModule,
   ],
 })
 export class AppModule { }

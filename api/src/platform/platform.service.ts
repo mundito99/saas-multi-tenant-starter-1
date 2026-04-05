@@ -49,63 +49,32 @@ export class PlatformService {
   async listTenants() {
     const tenants = await this.prisma.tenant.findMany({
       include: {
-        members: {
-          include: {
-            user: {
-              select: { email: true },
-            },
-            roles: {
-              include: {
-                role: { select: { name: true } },
-              },
-            },
-            branches: {
-              include: {
-                branch: {
-                  select: {
-                    id: true,
-                    name: true,
-                    slug: true,
-                    isMain: true,
-                    status: true,
-                  },
-                },
-              },
-            },
+        ownerUser: {
+          select: {
+            id: true,
+            email: true,
           },
         },
-        branches: {
-          orderBy: { createdAt: 'asc' },
+        _count: {
+          select: {
+            members: true,
+          },
         },
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    return tenants.map((tenant) => {
-      const ownerMembership = tenant.members.find((member) =>
-        member.roles.some((userRole) => userRole.role.name === 'OWNER'),
-      );
-
-      return {
-        id: tenant.id,
-        name: tenant.name,
-        slug: tenant.slug,
-        status: tenant.status,
-        createdAt: tenant.createdAt,
-        updatedAt: tenant.updatedAt,
-        memberCount: tenant.members.length,
-        ownerEmail: ownerMembership?.user.email ?? null,
-        branchCount: tenant.branches.length,
-        branches: tenant.branches.map((branch) => ({
-          id: branch.id,
-          name: branch.name,
-          slug: branch.slug,
-          code: branch.code,
-          isMain: branch.isMain,
-          status: branch.status,
-        })),
-      };
-    });
+    return tenants.map((tenant) => ({
+      id: tenant.id,
+      name: tenant.name,
+      slug: tenant.slug,
+      status: tenant.status,
+      createdAt: tenant.createdAt,
+      updatedAt: tenant.updatedAt,
+      memberCount: tenant._count.members,
+      ownerUserId: tenant.ownerUserId,
+      ownerEmail: tenant.ownerUser?.email ?? null,
+    }));
   }
 
   async updateTenantStatus(tenantId: string, status: string) {
@@ -126,19 +95,15 @@ export class PlatformService {
     });
   }
 
-  async createTenantWithAdminAndMainBranch(
+  async createTenantWithAdmin(
     actorUserId: string,
     dto: {
       tenantName: string;
       tenantSlug: string;
       adminEmail: string;
-      branchName: string;
-      branchSlug?: string;
-      branchCode?: string;
     },
   ) {
     const tenantSlug = this.normalizeSlug(dto.tenantSlug);
-    const branchSlug = this.normalizeSlug(dto.branchSlug || dto.branchName);
 
     const existingTenant = await this.prisma.tenant.findUnique({
       where: { slug: tenantSlug },
@@ -192,24 +157,6 @@ export class PlatformService {
         },
       });
 
-      const mainBranch = await tx.branch.create({
-        data: {
-          tenantId: tenant.id,
-          name: dto.branchName,
-          slug: branchSlug,
-          code: dto.branchCode,
-          isMain: true,
-          status: 'ACTIVE',
-        },
-      });
-
-      await tx.tenantUserBranch.create({
-        data: {
-          tenantUserId: membership.id,
-          branchId: mainBranch.id,
-        },
-      });
-
       return {
         tenant: {
           id: tenant.id,
@@ -220,65 +167,10 @@ export class PlatformService {
         admin: {
           id: adminUser.id,
           email: adminUser.email,
-        },
-        mainBranch: {
-          id: mainBranch.id,
-          name: mainBranch.name,
-          slug: mainBranch.slug,
-          code: mainBranch.code,
-          isMain: mainBranch.isMain,
+          membershipId: membership.id,
+          role: ownerRole.name,
         },
       };
-    });
-  }
-
-  async createBranch(
-    tenantId: string,
-    dto: {
-      name: string;
-      slug: string;
-      code?: string;
-    },
-  ) {
-    const slug = this.normalizeSlug(dto.slug);
-
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { id: true },
-    });
-
-    if (!tenant) {
-      throw new BadRequestException('Tenant not found');
-    }
-
-    const existing = await this.prisma.branch.findFirst({
-      where: { tenantId, slug },
-      select: { id: true },
-    });
-
-    if (existing) {
-      throw new BadRequestException('Branch slug already in use for tenant');
-    }
-
-    return this.prisma.branch.create({
-      data: {
-        tenantId,
-        name: dto.name,
-        slug,
-        code: dto.code,
-        isMain: false,
-        status: 'ACTIVE',
-      },
-      select: {
-        id: true,
-        tenantId: true,
-        name: true,
-        slug: true,
-        code: true,
-        isMain: true,
-        status: true,
-        createdAt: true,
-      },
     });
   }
 }

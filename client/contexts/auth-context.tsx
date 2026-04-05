@@ -10,7 +10,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<{ user: { id: string; email: string }; tenants: Tenant[] }>;
   selectTenant: (userId: string, tenantId: string) => Promise<void>;
-  register: (email: string, password: string, tenantName: string, tenantSlug: string) => Promise<void>;
+  register: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -24,7 +24,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const isAuthenticated = !!user;
 
-  // Check if user is authenticated on mount
   useEffect(() => {
     const checkAuth = async () => {
       const token = tokenStorage.getAccessToken();
@@ -57,23 +56,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const response = await authApi.selectTenant(userId, { tenantId });
     tokenStorage.setAccessToken(response.accessToken);
     tokenStorage.setRefreshToken(response.refreshToken);
-    
-    // Fetch user data
+
     const userData = await authApi.me();
     setUser(userData);
-    
+
     router.push('/app');
   };
 
-  const register = async (email: string, password: string, tenantName: string, tenantSlug: string) => {
-    const response = await authApi.register({ email, password, tenantName, tenantSlug });
-    tokenStorage.setUserId(response.userId);
-    
-    // Auto login after register
-    const loginResponse = await authApi.login({ email, password });
-    
-    // Auto select tenant
-    await selectTenant(loginResponse.user.id, response.tenantId);
+  const register = async (email: string, password: string) => {
+    await authApi.register({ email, password });
   };
 
   const logout = async () => {
@@ -81,7 +72,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         await authApi.logout(user.tenantId);
       } catch (error) {
-        // Even if logout fails, clear local storage
         console.error('Logout error:', error);
       }
     }
